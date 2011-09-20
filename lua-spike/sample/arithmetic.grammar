@@ -1,18 +1,18 @@
 input: expr eof { return item[1] }
 
-eof: /^\Z/
+eof: /\Z/
 
 expr: <leftop: term /([-+])/ term>
 
-        { return loadstring(table.concat(item[1], ' '))() }
+        { return loadstring("return " .. table.concat(item[1], ' '))() }
 
 term: <leftop: factor /([*\/])/ factor>
 
-        { return loadstring(table.concat(item[1], ' '))() }
+        { return loadstring("return " .. table.concat(item[1], ' '))() }
 
 factor: neg(?) number
 
-            { local neg = item[1][0] or '' return neg .. item[2] }
+            { local neg = item[1][1] or '' return neg .. item[2] }
 
       | '(' expr ')'  { return item[2] }
 

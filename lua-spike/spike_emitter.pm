@@ -122,7 +122,7 @@ sub emit_prod {
                 }
             }
             elsif ($item->[1] eq '?') {
-                $item = "_repeat_0_1(self.$item->[0])";
+                $item = "self:_repeat_0_1(self.$item->[0])";
             }
             elsif (@$item == 3 and $item->[1] =~ m{^/(.*)/$}) {
                 my $re = gen_lua_re($item->[1]);
@@ -175,17 +175,11 @@ function parse(self, text)
     return self:[% startrule %]()
 end
 
-function _try(self, rulename)
+function _try(self, rule)
     self.saved_pos = self.pos
 
     if not self.trace then
         return
-    end
-    local rule
-    if rulename then
-        rule = rulename
-    else
-        rule = _rulename()
     end
 
     self.level = self.level + 1
@@ -194,33 +188,21 @@ function _try(self, rulename)
     if self.verbose or self.saved_pos == nil
         or self.saved_pos ~= self.pos
     then
-        local next = string.sub(self.str, self.pos, self.pos + 15)
-        if string.len(string.sub(self.str, self.pos)) > 15 then
+        local next = string.sub(self.str, self.pos + 1, self.pos + 15)
+        if string.len(self.str) - (self.pos + 1) > 15 then
             next = next .. '...'
         end
 
-        print(string.format("%strying %s... %p\n", indent, rule, next))
+        print(string.format("%strying %s... %q\n", indent, rule, next))
 
     else
         print(string.format("%strying %s...\n", indent, rule))
     end
 end
 
-function _rulename()
-    return debug.getinfo(2, "n").name
-end
-
-function _fail(self, rulename)
+function _fail(self, rule)
     if not self.trace then
         return
-    end
-
-    local rule
-    if rulename then
-        rule = rulename
-
-    else
-        rule = _rulename()
     end
 
     local indent = string.rep(' ', self.level)
@@ -229,17 +211,9 @@ function _fail(self, rulename)
     self.level = self.level - 1
 end
 
-function _succeed(self, rulename)
+function _succeed(self, rule)
     if not self.trace then
         return
-    end
-
-    local rule
-    if rulename then
-        rule = rulename
-
-    else
-        rule = _rulename()
     end
 
     local indent = string.rep(' ', self.level)
@@ -247,27 +221,92 @@ function _succeed(self, rulename)
     self.level = self.level - 1
 end
 
+local _re
+if ngx and ngx.re then
+    _re = ngx.re
+
+else
+    local _lrexlib = require "rex_pcre"
+    _re = {
+        match = function (subj, pat, opts, ctx)
+            local init = 1
+            if ctx and ctx.pos ~= nil then
+                init = ctx.pos + 1
+            end
+
+            if opts then
+                local tmp = string.gsub(opts, "a", "")
+                if string.len(tmp) ~= string.len(opts) then
+                    pat = "\\G" .. pat
+                    opts = tmp
+                end
+
+                tmp = string.gsub(opts, "o", "")
+                if string.len(tmp) ~= string.len(opts) then
+                    opts = tmp
+                end
+            end
+
+            --[[ print("init: " .. init
+                .. ", regex: /" .. pat
+                .. "/, opts: \"" .. opts .. "\""
+                .. ", subj: \"" .. subj .. "\"")
+            ]]
+
+            local match = {
+                _lrexlib.find(subj, pat, init, opts)
+            }
+
+            local from = match[1]
+            if from == nil then
+                -- print("NOT MATCHED")
+                return nil
+            end
+
+            -- print("MATCHED")
+
+            local to = match[2]
+            local caps = {[0] = string.sub(subj, from, to)}
+            for i, cap in ipairs(match) do
+                if i ~= 1 and i ~= 2 then
+                    table.insert(caps, cap)
+                end
+            end
+
+            if ctx then
+                print("moving pos to " .. to)
+                ctx.pos = to
+            end
+
+            local cjson = require "cjson"
+            print("caps: " .. cjson.encode(caps))
+
+            return caps
+        end
+    }
+end
+
 [% FOREACH rule = alternation.keys -%]
 function [% rule %](self)
-    self:_try()
+    self:_try('[% rule %]')
 
     [%- productions = alternation.$rule %]
     [%- FOREACH production = productions %]
     local match, commit = self:[% production %]()
     if match ~= nil then
-        self:_succeed()
+        self:_succeed('[% rule %]')
         return match
     end
 
       [%- IF production != productions.last %]
     if commit then
-        self:_fail()
+        self:_fail('[% rule %]')
         return nil
     end
 
       [%- END %]
     [%- END %]
-    self:_fail()
+    self:_fail('[% rule %]')
     return nil
 end
 
@@ -275,10 +314,10 @@ end
 
 [%- FOREACH rule = concat.keys -%]
 function [% rule %](self)
-    self:_try()
+    self:_try('[% rule %]')
 
     local commit = false
-    local item = {'[% rule %]'}
+    local item = {[0] = '[% rule %]'}
     local text = self.str
     local match = ''
     local saved_pos = self.pos
@@ -302,14 +341,14 @@ function [% rule %](self)
       [%- END %]
         self.pos = saved_pos -- XXX not sure if it's the right thing to do
 
-        self:_fail()
+        self:_fail('[% rule %]')
         return nil
     end
 
     table.insert(item, match)
     [%- END %]
   [%- END %]
-    self:_succeed()
+    self:_succeed('[% rule %]')
     return match, commit
 end
 
@@ -317,20 +356,20 @@ end
 
 [%- FOREACH rule = atoms.keys -%]
 function [% rule %](self)
-    self:_try()
+    self:_try('[% rule %]')
 
-    local item = {'[% rule %]'}
+    local item = {[0] = '[% rule %]'}
     local text = self.str
     local pos = self.pos
 
     local match = [% atoms.$rule %]
     if match ~= nil then
-        self:_succeed()
+        self:_succeed('[% rule %]')
         table.insert(item, match)
         return match
     end
 
-    self:_fail()
+    self:_fail('[% rule %]')
     return nil
 end
 
@@ -340,10 +379,10 @@ function _match_str(self, target)
 
     self:_try(label)
 
-    _re.match(self.str, "\\s+", "ao", self)
+    _re.match(self.str, "\\s+", "aoms", self)
 
     local last = self.pos + string.len(target)
-    if string.sub(self.str, self.pos, last) ~= target then
+    if string.sub(self.str, self.pos + 1, last) ~= target then
         self:_fail(label)
         return nil
     end
@@ -359,8 +398,8 @@ function _match_re(self, re)
 
     _re.match(self.str, "\\s+", "aoms", self)
 
-    local m = _re.match(self.str, re, "ao", self)
-    if not m then
+    local m = _re.match(self.str, re, "aoms", self)
+    if m == nil then
         self:_fail(label)
         return nil
     end
@@ -514,13 +553,14 @@ function _match_leftop(self, f, sep, g)
 
     while true do
         local saved_pos = self.pos
+
         local match = self:_match_re(sep)
         if match == nil then
             do break end
         end
 
         local sep_match
-        if self.capture then
+        if self.capture ~= nil then
             sep_match = self.capture
         end
 
@@ -546,58 +586,6 @@ end
 
 function _error(self)
     return nil
-end
-
-local _re
-if ngx and ngx.re then
-    _re = ngx.re
-
-else
-    local _lrexlib = require "rex_pcre"
-    _re = {
-        match = function (subj, pat, opts, ctx)
-            local init = 0
-            if ctx and ctx.pos ~= nil then
-                init = ctx.pos
-            end
-
-            if opts then
-                local tmp = string.gsub(opts, "a", "")
-                if string.len(tmp) ~= string.len(opts) then
-                    pat = "\\G" .. pat
-                    opts = tmp
-                end
-
-                tmp = string.gsub(opts, "o", "")
-                if string.len(tmp) ~= string.len(opts) then
-                    opts = tmp
-                end
-            end
-
-            local match = {
-                _lrexlib.find(subj, pat, init, opts)
-            }
-
-            local from = match[1]
-            if from == nil then
-                return nil
-            end
-
-            local to = match[2]
-            local caps = {string.sub(subj, from, to)}
-            for i, cap in ipairs(match) do
-                if i ~= 1 and i ~= 2 then
-                    table.insert(caps, cap)
-                end
-            end
-
-            if ctx then
-                ctx.pos = to
-            end
-
-            return caps
-        end
-    }
 end
 
 getmetatable([% package %]).__newindex =
