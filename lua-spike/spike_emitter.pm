@@ -105,10 +105,10 @@ sub emit_prod {
                         $item->[2] = gen_lua_re($item->[2]);
                     }
 
-                    $item = "self:_repeat_1_n_sep(self:$item->[0], $item->[2])";
+                    $item = "self:_repeat_1_n_sep(self.$item->[0], $item->[2])";
 
                 } else {
-                    $item = "self:_repeat_1_n(self:$item->[0])";
+                    $item = "self:_repeat_1_n(self.$item->[0])";
                 }
             }
             elsif ($item->[1] eq 's?') {
@@ -429,7 +429,7 @@ function _repeat_1_n_sep(self, f, sep)
         end
 
         match = f(self)
-        if match ~= nil then
+        if match == nil then
             self.pos = saved_pos
             do break end
         end
