@@ -159,13 +159,15 @@ _EOC_
 __DATA__
 module('[% package %]', package.seeall)
 
-local meta = {
+local _meta = {
     __index = [% package %]
 }
 
+local _re_cache = {}
+
 function new(opts)
     local self = opts or {}
-    return setmetatable(self, meta)
+    return setmetatable(self, _meta)
 end
 
 function parse(self, text)
@@ -234,16 +236,29 @@ else
                 init = ctx.pos + 1
             end
 
-            if opts then
-                local tmp = string.gsub(opts, "a", "")
-                if string.len(tmp) ~= string.len(opts) then
-                    pat = "\\G" .. pat
-                    opts = tmp
-                end
+            local re, key
 
-                tmp = string.gsub(opts, "o", "")
-                if string.len(tmp) ~= string.len(opts) then
-                    opts = tmp
+            if opts then
+                key = pat .. "\000" .. opts
+                re = _re_cache[key]
+                if not re then
+                    local tmp = string.gsub(opts, "a", "")
+                    if string.len(tmp) ~= string.len(opts) then
+                        pat = "\\G(?:" .. pat .. ")"
+                        opts = tmp
+                    end
+
+                    tmp = string.gsub(opts, "o", "")
+                    if string.len(tmp) ~= string.len(opts) then
+                        opts = tmp
+                    end
+                end
+            end
+
+            if not re then
+                re = _lrexlib.new(pat, opts)
+                if key then
+                    _re_cache[key] = re
                 end
             end
 
@@ -254,7 +269,7 @@ else
             ]]
 
             local match = {
-                _lrexlib.find(subj, pat, init, opts)
+                re:find(subj, init)
             }
 
             local from = match[1]
@@ -274,12 +289,12 @@ else
             end
 
             if ctx then
-                print("moving pos to " .. to)
+                -- print("moving pos to " .. to)
                 ctx.pos = to
             end
 
-            local cjson = require "cjson"
-            print("caps: " .. cjson.encode(caps))
+            -- local cjson = require "cjson"
+            -- print("caps: " .. cjson.encode(caps))
 
             return caps
         end
