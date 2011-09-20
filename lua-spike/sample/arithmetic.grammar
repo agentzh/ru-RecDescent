@@ -1,0 +1,22 @@
+input: expr eof { return item[1] }
+
+eof: /^\Z/
+
+expr: <leftop: term /([-+])/ term>
+
+        { return loadstring(table.concat(item[1], ' '))() }
+
+term: <leftop: factor /([*\/])/ factor>
+
+        { return loadstring(table.concat(item[1], ' '))() }
+
+factor: neg(?) number
+
+            { local neg = item[1][0] or '' return neg .. item[2] }
+
+      | '(' expr ')'  { return item[2] }
+
+neg: '-'
+
+number: /[1-9]\d*/
+
